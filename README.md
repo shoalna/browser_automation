@@ -206,6 +206,7 @@ browser.run()
 | `headless` | `bool` | `True` | Hide the browser window |
 | `viewport` | `tuple[int,int]` | `(1280, 720)` | Window size in pixels |
 | `user_agent` | `str \| None` | `None` | Override the User-Agent header |
+| `http_credentials` | `tuple[str, str] \| None` | `None` | `(username, password)` for HTTP Basic Auth |
 | `state_file` | `str \| None` | `None` | Path to session JSON (load + save) |
 | `screenshot_on_failure` | `bool` | `False` | Auto-screenshot on action errors |
 | `verbose` | `bool` | `False` | Enable DEBUG-level logging |

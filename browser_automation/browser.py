@@ -98,6 +98,9 @@ class Browser:
         viewport: ``(width, height)`` tuple in pixels. Defaults to
             ``(1280, 720)``.
         user_agent: Override the browser's default user agent string.
+        http_credentials: Username and password for HTTP Basic Authentication,
+            as a ``(username, password)`` tuple. Applied to all requests made
+            by this browser session.
         state_file: Path to a JSON file for persisting cookies and
             ``localStorage``. Loaded on start; saved (or created) after
             ``.run()`` completes.
@@ -115,6 +118,16 @@ class Browser:
             result = Browser().goto("https://example.com").extract("h1", name="title").run()
             print(result["title"])  # "Example Domain"
 
+        HTTP Basic Auth::
+
+            result = (
+                Browser(http_credentials=("alice", "secret"))
+                .goto("https://httpbin.org/basic-auth/alice/secret")
+                .extract("pre", name="body")
+                .run()
+            )
+            print(result["body"])  # {"authenticated": true, "user": "alice"}
+
         Full constructor::
 
             browser = Browser(
@@ -122,6 +135,7 @@ class Browser:
                 headless=False,
                 viewport=(1920, 1080),
                 user_agent="Mozilla/5.0 (compatible; MyBot/1.0)",
+                http_credentials=("user", "pass"),
                 state_file="session.json",
                 screenshot_on_failure=True,
                 verbose=True,
@@ -135,6 +149,7 @@ class Browser:
         headless: bool = True,
         viewport: tuple[int, int] = (1280, 720),
         user_agent: str | None = None,
+        http_credentials: tuple[str, str] | None = None,
         state_file: str | None = None,
         screenshot_on_failure: bool = False,
         verbose: bool = False,
@@ -143,6 +158,7 @@ class Browser:
         self._headless = headless
         self._viewport = {"width": viewport[0], "height": viewport[1]}
         self._user_agent = user_agent
+        self._http_credentials = http_credentials
         self._state_file = state_file
         self._screenshot_on_failure = screenshot_on_failure
 
@@ -207,6 +223,12 @@ class Browser:
         context_kwargs: dict = {"viewport": self._viewport}
         if self._user_agent:
             context_kwargs["user_agent"] = self._user_agent
+        if self._http_credentials:
+            context_kwargs["http_credentials"] = {
+                "username": self._http_credentials[0],
+                "password": self._http_credentials[1],
+            }
+            logger.debug("HTTP Basic Auth configured for user %r", self._http_credentials[0])
         if self._state_file:
             import os
             if os.path.exists(self._state_file):
