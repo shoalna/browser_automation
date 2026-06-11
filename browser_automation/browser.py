@@ -704,6 +704,50 @@ class Browser:
         self._steps.append((step, (), {}))
         return self
 
+    def save_html(self, filename: str | None = None) -> "Browser":
+        """Save the full HTML of the current page to a file.
+
+        Captures the live DOM at this point in the chain — includes dynamically
+        created content that would not appear in a static ``curl`` of the URL.
+
+        Args:
+            filename: Output file path. If omitted, saves to
+                ``page_YYYYMMDD_HHMMSS.html`` in the current directory.
+
+        Returns:
+            ``self`` for chaining.
+
+        Examples:
+            ::
+
+                # Auto-named dump — useful for debugging dynamic content
+                Browser().goto(url).wait().save_html().run()
+
+                # Named file
+                Browser().goto(url).click("#tab2").wait().save_html("tab2.html").run()
+
+                # Checkpoint before and after an action
+                Browser()
+                    .goto(url)
+                    .save_html("before.html")
+                    .click("#load-more")
+                    .wait()
+                    .save_html("after.html")
+                    .run()
+        """
+        def step():
+            fname = filename
+            if fname is None:
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                fname = f"page_{ts}.html"
+            html = self._ensure_page().content()
+            with open(fname, "w", encoding="utf-8") as f:
+                f.write(html)
+            logger.debug("saved HTML to %s (%d bytes)", fname, len(html))
+
+        self._steps.append((step, (), {}))
+        return self
+
     # ------------------------------------------------------------------
     # Control flow
     # ------------------------------------------------------------------

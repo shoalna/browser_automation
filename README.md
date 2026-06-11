@@ -258,6 +258,7 @@ browser.run()
 | Method | Description |
 |---|---|
 | `.screenshot(filename=None)` | Save screenshot (auto-named if omitted) |
+| `.save_html(filename=None)` | Save full live DOM as HTML (auto-named if omitted) |
 
 ### Debug
 
