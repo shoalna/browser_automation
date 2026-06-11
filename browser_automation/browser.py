@@ -47,6 +47,7 @@ Escape hatch — access the raw Playwright page::
 
 from __future__ import annotations
 
+import base64
 import datetime
 import logging
 import subprocess
@@ -224,11 +225,14 @@ class Browser:
         if self._user_agent:
             context_kwargs["user_agent"] = self._user_agent
         if self._http_credentials:
-            context_kwargs["http_credentials"] = {
-                "username": self._http_credentials[0],
-                "password": self._http_credentials[1],
-            }
-            logger.debug("HTTP Basic Auth configured for user %r", self._http_credentials[0])
+            username, password = self._http_credentials
+            # Respond to 401 challenges
+            context_kwargs["http_credentials"] = {"username": username, "password": password}
+            # Also send Authorization header proactively — required by servers that
+            # reject the first request without credentials instead of issuing a 401.
+            token = base64.b64encode(f"{username}:{password}".encode()).decode()
+            context_kwargs["extra_http_headers"] = {"Authorization": f"Basic {token}"}
+            logger.debug("HTTP Basic Auth configured for user %r", username)
         if self._state_file:
             import os
             if os.path.exists(self._state_file):
@@ -485,6 +489,60 @@ class Browser:
             lambda: action_scroll(self._ensure_page(), selector, y),
             (), {},
         ))
+        return self
+
+    # ------------------------------------------------------------------
+    # Debug
+    # ------------------------------------------------------------------
+
+    def pause(self) -> "Browser":
+        """Pause execution and open the Playwright Inspector for interactive debugging.
+
+        Halts the workflow at this point in the chain and opens a visual
+        browser inspector where you can:
+
+        - Inspect the current DOM and page state
+        - Step through subsequent actions one-by-one
+        - Run locator queries interactively
+        - Click **Resume** to continue the workflow
+
+        Only meaningful when ``headless=False``. In headless mode, pausing is
+        skipped with a warning so that automated runs are not blocked.
+
+        Returns:
+            ``self`` for chaining.
+
+        Examples:
+            ::
+
+                # Inspect the page after login before continuing
+                result = (
+                    Browser(headless=False)
+                    .goto("https://example.com/login")
+                    .type("#email", "user@example.com")
+                    .type("#password", "secret")
+                    .click("[type=submit]")
+                    .pause()          # <-- opens inspector here; click Resume to continue
+                    .extract("h1", name="greeting")
+                    .run()
+                )
+
+                # Pause at multiple checkpoints
+                Browser(headless=False)
+                    .goto(url)
+                    .pause()          # inspect initial page
+                    .click("#next")
+                    .pause()          # inspect after click
+                    .run()
+        """
+        def step():
+            if self._headless:
+                logger.warning("pause() called in headless mode — skipping")
+                return
+            logger.debug("pausing — open Playwright Inspector to resume")
+            self._ensure_page().pause()
+
+        self._steps.append((step, (), {}))
         return self
 
     # ------------------------------------------------------------------

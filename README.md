@@ -259,6 +259,12 @@ browser.run()
 |---|---|
 | `.screenshot(filename=None)` | Save screenshot (auto-named if omitted) |
 
+### Debug
+
+| Method | Description |
+|---|---|
+| `.pause()` | Open Playwright Inspector and halt until Resume is clicked (skipped in headless mode) |
+
 ### Control flow
 
 | Method | Description |
