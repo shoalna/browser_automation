@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "browser_automation"
+version = "0.1.0"
+description = "A fluent, ergonomic browser automation library built on Playwright"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "playwright>=1.40.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "twine",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["browser_automation*"]
