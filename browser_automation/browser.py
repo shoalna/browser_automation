@@ -773,6 +773,80 @@ class Browser:
         return self
 
     # ------------------------------------------------------------------
+    # Conditional / arbitrary mid-workflow logic
+    # ------------------------------------------------------------------
+
+    def do(self, fn: Callable[[dict, "Browser"], None]) -> "Browser":
+        """Execute arbitrary logic mid-workflow with access to extracted data.
+
+        Solves the if/else problem: ``extract()`` values are stored internally
+        and only returned after ``run()``. ``do()`` lets you read those values
+        and branch on them **before** the session ends.
+
+        *fn* receives ``(store, browser)`` where ``store`` is the dict of all
+        values extracted so far, and ``browser`` is this ``Browser`` instance
+        so the full fluent API is available.
+
+        Steps added inside *fn* (e.g. ``b.click(...)``) are captured and
+        executed immediately in the same browser session.
+
+        Args:
+            fn: Callable that receives ``(store, browser)`` and performs
+                conditional actions.
+
+        Returns:
+            ``self`` for chaining.
+
+        Examples:
+            ::
+
+                # Click different buttons based on extracted value
+                result = (
+                    Browser()
+                    .goto("https://example.com")
+                    .extract("#status", name="status")
+                    .do(lambda store, b:
+                        b.click("#activate") if store["status"] == "inactive"
+                        else b.click("#deactivate")
+                    )
+                    .run()
+                )
+
+                # Check a checkbox only if it is unchecked
+                Browser()
+                    .goto("https://example.com")
+                    .extract("#terms", name="checked", attr="checked", optional=True)
+                    .do(lambda store, b:
+                        b.click("#terms") if not store.get("checked") else None
+                    )
+                    .run()
+
+                # Multi-step branch
+                def handle(store, b):
+                    if store["role"] == "admin":
+                        b.click("#admin-panel").wait()
+                    else:
+                        b.click("#user-panel").wait()
+
+                Browser()
+                    .goto("https://example.com")
+                    .extract(".role-badge", name="role")
+                    .do(handle)
+                    .extract("h1", name="heading")
+                    .run()
+        """
+        def step():
+            steps_before = len(self._steps)
+            fn(self._store, self)
+            branch_steps = self._steps[steps_before:]
+            self._steps = self._steps[:steps_before]
+            for branch_fn, args, kwargs in branch_steps:
+                branch_fn(*args, **kwargs)
+
+        self._steps.append((step, (), {}))
+        return self
+
+    # ------------------------------------------------------------------
     # Iframe
     # ------------------------------------------------------------------
 

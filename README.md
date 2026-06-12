@@ -278,6 +278,7 @@ browser.run()
 | Method | Description |
 |---|---|
 | `.if_exists(selector, fn)` | Run `fn(browser)` only if selector found |
+| `.do(fn)` | Run `fn(store, browser)` mid-workflow — read extracted values and branch |
 | `.each(selector, fn)` | Run `fn(browser, locator)` per element |
 | `.repeat(n, fn)` | Run `fn(browser)` exactly n times |
 | `.repeat_until(selector, fn, max_iterations=100)` | Run `fn(browser)` until selector appears |
