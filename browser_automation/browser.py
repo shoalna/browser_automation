@@ -1080,8 +1080,13 @@ class Browser:
         """
         with sync_playwright() as playwright:
             self._start(playwright)
+            # Snapshot and clear before iterating — within_frame appends to
+            # self._steps during execution; iterating the live list would cause
+            # those steps to run a second time after within_frame already ran them.
+            steps_snapshot = list(self._steps)
+            self._steps.clear()
             try:
-                for step_tuple in self._steps:
+                for step_tuple in steps_snapshot:
                     fn, args, kwargs = step_tuple
                     fn(*args, **kwargs)
             except Exception:
