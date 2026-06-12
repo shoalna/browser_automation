@@ -852,11 +852,19 @@ class Browser:
                     return
                 raise
 
-            # swap the active page for the frame duration
+            # fn(self) adds deferred steps to self._steps — capture them,
+            # remove from the main queue, then execute immediately inside
+            # the frame context before restoring the original page.
+            steps_before = len(self._steps)
+            fn(self)
+            frame_steps = self._steps[steps_before:]
+            self._steps = self._steps[:steps_before]
+
             original_page = self._page
             self._page = frame  # type: ignore[assignment]
             try:
-                fn(self)
+                for fn_step, args, kwargs in frame_steps:
+                    fn_step(*args, **kwargs)
             finally:
                 self._page = original_page
 
