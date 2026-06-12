@@ -1084,5 +1084,10 @@ class Browser:
             raise
         else:
             self._teardown()
+        finally:
+            self._steps.clear()
 
-        return Result(data=self._store, errors=self._errors)
+        result = Result(data=self._store, errors=self._errors)
+        self._store = {}
+        self._errors = []
+        return result
