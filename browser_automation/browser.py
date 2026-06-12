@@ -201,12 +201,14 @@ class Browser:
             )
 
     def _ensure_page(self) -> Page:
-        """Lazily start Playwright and return the active page."""
-        if self._page is not None:
-            return self._page
+        """Return the active page — must be called inside the run() context."""
+        if self._page is None:
+            raise RuntimeError("No active page. This should only be called inside run().")
+        return self._page
 
-        self._playwright = sync_playwright().start()
-        browser_launcher = getattr(self._playwright, self._browser_type)
+    def _start(self, playwright: Playwright) -> None:
+        """Start the browser and create the page inside the playwright context."""
+        browser_launcher = getattr(playwright, self._browser_type)
 
         try:
             self._pw_browser = browser_launcher.launch(headless=self._headless)
@@ -242,10 +244,9 @@ class Browser:
 
         context = self._pw_browser.new_context(**context_kwargs)
         self._page = context.new_page()
-        return self._page
 
-    def _teardown(self) -> None:
-        """Save session state (if configured) and close Playwright."""
+    def _stop(self) -> None:
+        """Save session state and close page, context, and browser."""
         try:
             if self._page:
                 if self._state_file:
@@ -256,22 +257,14 @@ class Browser:
                 context.close()
         except Exception as exc:
             logger.debug("error closing page/context: %s", exc)
-
         try:
             if self._pw_browser:
                 self._pw_browser.close()
         except Exception as exc:
             logger.debug("error closing browser: %s", exc)
-
-        try:
-            if self._playwright:
-                self._playwright.stop()
-        except Exception as exc:
-            logger.debug("error stopping playwright: %s", exc)
-
-        self._page = None
-        self._pw_browser = None
-        self._playwright = None
+        finally:
+            self._page = None
+            self._pw_browser = None
 
     def _handle_failure(self, exc: Exception, description: str) -> str:
         """Take a screenshot (if configured) and return an error message."""
@@ -307,17 +300,33 @@ class Browser:
         """The underlying Playwright :class:`Page` object.
 
         Use this to access any Playwright feature not exposed by the fluent
-        API.
+        API. When using the escape hatch outside of the fluent chain, call
+        ``_start()`` / ``_stop()`` manually or use ``sync_playwright()``
+        directly.
 
         Examples:
             ::
 
+                # inside fluent chain — page is active during run()
                 browser = Browser()
                 browser.goto("https://example.com")
-                browser.page.pdf(path="output.pdf")
-                browser.run()
+                browser.page   # only valid inside a step lambda or after goto()
+
+                # escape hatch — manage lifecycle manually
+                from playwright.sync_api import sync_playwright
+                browser = Browser(headless=False)
+                with sync_playwright() as pw:
+                    browser._start(pw)
+                    browser.page.goto("https://example.com")
+                    browser.page.pdf(path="output.pdf")
+                    browser._stop()
         """
-        return self._ensure_page()
+        if self._page is None:
+            raise RuntimeError(
+                "No active page. Use the fluent chain and call .run(), "
+                "or manage the lifecycle manually with _start()/_stop()."
+            )
+        return self._page
 
     # ------------------------------------------------------------------
     # Navigation
@@ -1069,23 +1078,23 @@ class Browser:
                 else:
                     print("Soft failures:", result.errors)
         """
-        try:
-            for step_tuple in self._steps:
-                fn, args, kwargs = step_tuple
-                fn(*args, **kwargs)
-        except Exception:
-            if self._keep_open_on_error and not self._headless:
-                logger.warning(
-                    "keep_open_on_error=True — browser left open for inspection. "
-                    "Close it manually when done."
-                )
-                input("Browser paused on error. Press Enter to close it...")
-            self._teardown()
-            raise
-        else:
-            self._teardown()
-        finally:
-            self._steps.clear()
+        with sync_playwright() as playwright:
+            self._start(playwright)
+            try:
+                for step_tuple in self._steps:
+                    fn, args, kwargs = step_tuple
+                    fn(*args, **kwargs)
+            except Exception:
+                if self._keep_open_on_error and not self._headless:
+                    logger.warning(
+                        "keep_open_on_error=True — browser left open for inspection. "
+                        "Close it manually when done."
+                    )
+                    input("Browser paused on error. Press Enter to close it...")
+                raise
+            finally:
+                self._stop()
+                self._steps.clear()
 
         result = Result(data=self._store, errors=self._errors)
         self._store = {}
