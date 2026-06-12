@@ -743,6 +743,127 @@ class Browser:
         return self
 
     # ------------------------------------------------------------------
+    # Iframe
+    # ------------------------------------------------------------------
+
+    def frame(self, selector: str) -> "Page":
+        """Return the raw Playwright ``Frame`` object for an iframe.
+
+        This is an escape hatch for direct iframe access — the returned frame
+        is a Playwright object, not a fluent ``Browser``.
+
+        Note: call this after the page has loaded (i.e. after using
+        ``browser.page.goto()`` directly, or inside a deferred step via
+        ``if_exists`` / ``each``).
+
+        Args:
+            selector: CSS selector of the ``<iframe>`` element.
+
+        Returns:
+            A Playwright ``Frame`` object.
+
+        Examples:
+            ::
+
+                browser = Browser(headless=False)
+                browser.page.goto("https://example.com")
+                browser.page.wait_for_load_state("networkidle")
+
+                frame = browser.frame("iframe#content")
+                print(frame.content())
+                print(frame.locator("h1").inner_text())
+
+                with open("iframe.html", "w") as f:
+                    f.write(frame.content())
+
+                browser.run()
+        """
+        page = self._ensure_page()
+        element = page.locator(selector).first.element_handle()
+        return element.content_frame()
+
+    def within_frame(
+        self,
+        selector: str,
+        fn: Callable[["Browser"], None],
+        *,
+        optional: bool = False,
+    ) -> "Browser":
+        """Run *fn* with all actions scoped to an iframe.
+
+        Temporarily redirects every action inside *fn* to operate on the
+        iframe's document instead of the main page. The iframe context is
+        restored after *fn* returns.
+
+        Args:
+            selector: CSS selector of the ``<iframe>`` element.
+            fn: Callable receiving this ``Browser`` instance. All actions
+                inside operate on the iframe.
+            optional: Record failure instead of raising if the iframe is
+                not found.
+
+        Returns:
+            ``self`` for chaining.
+
+        Examples:
+            ::
+
+                # Extract content from an iframe
+                result = (
+                    Browser()
+                    .goto("https://example.com")
+                    .wait("iframe#content")
+                    .within_frame("iframe#content", lambda b: (
+                        b.extract("h1", name="title")
+                         .extract_all(".item", name="items")
+                    ))
+                    .run()
+                )
+                print(result["title"])
+                print(result["items"])
+
+                # Click and type inside an iframe
+                Browser()
+                    .goto("https://example.com")
+                    .within_frame("iframe#login-frame", lambda b: (
+                        b.type("#username", "user")
+                         .type("#password", "pass")
+                         .click("button[type=submit]")
+                    ))
+                    .wait()
+                    .run()
+
+                # Save iframe HTML
+                Browser()
+                    .goto("https://example.com")
+                    .within_frame("iframe#content", lambda b: b.save_html("iframe.html"))
+                    .run()
+        """
+        def step():
+            page = self._ensure_page()
+            try:
+                element = page.locator(selector).first.element_handle()
+                frame = element.content_frame()
+            except Exception as exc:
+                msg = f"within_frame({selector!r}): {exc}"
+                if optional:
+                    logger.warning("optional within_frame failed — %s", msg)
+                    self._errors.append(msg)
+                    return
+                raise
+
+            # swap the active page for the frame duration
+            original_page = self._page
+            self._page = frame  # type: ignore[assignment]
+            try:
+                fn(self)
+            finally:
+                self._page = original_page
+
+        self._steps.append((step, (), {}))
+        return self
+
+    # ------------------------------------------------------------------
     # Control flow
     # ------------------------------------------------------------------
 

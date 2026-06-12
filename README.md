@@ -266,6 +266,13 @@ browser.run()
 |---|---|
 | `.pause()` | Open Playwright Inspector and halt until Resume is clicked (skipped in headless mode) |
 
+### Iframe
+
+| Method | Description |
+|---|---|
+| `.within_frame(selector, fn)` | Run `fn(browser)` with all actions scoped to the iframe |
+| `.frame(selector)` | Return the raw Playwright `Frame` object (escape hatch) |
+
 ### Control flow
 
 | Method | Description |
