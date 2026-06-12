@@ -246,14 +246,28 @@ class Browser:
 
     def _teardown(self) -> None:
         """Save session state (if configured) and close Playwright."""
-        if self._page and self._state_file:
-            self._page.context.storage_state(path=self._state_file)
-            logger.debug("saved session state to %s", self._state_file)
+        try:
+            if self._page:
+                if self._state_file:
+                    self._page.context.storage_state(path=self._state_file)
+                    logger.debug("saved session state to %s", self._state_file)
+                context = self._page.context
+                self._page.close()
+                context.close()
+        except Exception as exc:
+            logger.debug("error closing page/context: %s", exc)
 
-        if self._pw_browser:
-            self._pw_browser.close()
-        if self._playwright:
-            self._playwright.stop()
+        try:
+            if self._pw_browser:
+                self._pw_browser.close()
+        except Exception as exc:
+            logger.debug("error closing browser: %s", exc)
+
+        try:
+            if self._playwright:
+                self._playwright.stop()
+        except Exception as exc:
+            logger.debug("error stopping playwright: %s", exc)
 
         self._page = None
         self._pw_browser = None
