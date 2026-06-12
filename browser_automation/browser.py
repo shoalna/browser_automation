@@ -106,6 +106,10 @@ class Browser:
             ``.run()`` completes.
         screenshot_on_failure: Save a timestamped screenshot whenever an
             action raises an exception.
+        keep_open_on_error: Keep the browser window open when an error occurs
+            instead of closing it automatically. Useful for debugging —
+            inspect the page state at the point of failure. Has no effect
+            in headless mode.
         verbose: Set to ``True`` to emit DEBUG-level log records on every
             action. Equivalent to calling
             ``logging.getLogger("browser_automation").setLevel(logging.DEBUG)``.
@@ -138,6 +142,7 @@ class Browser:
                 http_credentials=("user", "pass"),
                 state_file="session.json",
                 screenshot_on_failure=True,
+                keep_open_on_error=True,
                 verbose=True,
             )
     """
@@ -152,6 +157,7 @@ class Browser:
         http_credentials: tuple[str, str] | None = None,
         state_file: str | None = None,
         screenshot_on_failure: bool = False,
+        keep_open_on_error: bool = False,
         verbose: bool = False,
     ) -> None:
         self._browser_type = browser
@@ -159,6 +165,7 @@ class Browser:
         self._viewport = {"width": viewport[0], "height": viewport[1]}
         self._user_agent = user_agent
         self._http_credentials = http_credentials
+        self._keep_open_on_error = keep_open_on_error
         self._state_file = state_file
         self._screenshot_on_failure = screenshot_on_failure
 
@@ -1052,7 +1059,16 @@ class Browser:
             for step_tuple in self._steps:
                 fn, args, kwargs = step_tuple
                 fn(*args, **kwargs)
-        finally:
+        except Exception:
+            if self._keep_open_on_error and not self._headless:
+                logger.warning(
+                    "keep_open_on_error=True — browser left open for inspection. "
+                    "Close it manually when done."
+                )
+                input("Browser paused on error. Press Enter to close it...")
+            self._teardown()
+            raise
+        else:
             self._teardown()
 
         return Result(data=self._store, errors=self._errors)
