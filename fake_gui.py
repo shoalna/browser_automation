@@ -1,23 +1,22 @@
 """
-Flet GUI sample (compatible with Flet 0.85.3).
+Flet GUI sample (compatible with Flet 0.85.3) — sync mode.
 
 Run with:
     pip install "flet==0.85.3"
     python fake_gui.py
 """
 
-import asyncio
+import time
 import flet as ft
 
 
-async def main(page: ft.Page):
+def main(page: ft.Page):
     page.title = "Flet Sample"
     page.window.width = 520
     page.window.height = 420
     page.padding = 20
 
-    # --- FilePicker — service in Flet 0.85, added to page.services ---
-    # pick_files() returns list[FilePickerFile] directly, no on_result callback
+    # --- FilePicker — service in Flet 0.85 ---
     file_picker = ft.FilePicker()
     page.services.append(file_picker)
 
@@ -28,14 +27,18 @@ async def main(page: ft.Page):
         expand=True,
     )
 
-    async def on_browse(e):
-        files = await file_picker.pick_files(
-            allowed_extensions=["csv"],
-            allow_multiple=False,
-        )
-        if files:
-            csv_path_field.value = files[0].path
-            page.update()
+    def on_browse(e):
+        # pick_files() is a coroutine — use page.run_task() from sync context
+        async def do_pick():
+            files = await file_picker.pick_files(
+                allowed_extensions=["csv"],
+                allow_multiple=False,
+            )
+            if files:
+                csv_path_field.value = files[0].path
+                page.update()
+
+        page.run_task(do_pick)
 
     browse_button = ft.ElevatedButton(
         "Browse",
@@ -66,7 +69,7 @@ async def main(page: ft.Page):
     progress_bar = ft.ProgressBar(width=460, value=0)
     status_text = ft.Text("Ready")
 
-    async def run_process(e):
+    def run_process(e):
         if not csv_path_field.value:
             status_text.value = "Please select a CSV file first."
             page.update()
@@ -92,7 +95,7 @@ async def main(page: ft.Page):
         for i in range(batch_size + 1):
             progress_bar.value = i / batch_size
             page.update()
-            await asyncio.sleep(0.02)
+            time.sleep(0.02)
 
         status_text.value = "Done!"
         run_button.disabled = False
