@@ -3,40 +3,43 @@ Flet GUI sample.
 
 Run with:
     pip install flet
-    python flet_sample.py
+    python fake_gui.py
 """
 
+import asyncio
 import time
 import flet as ft
 
 
-def main(page: ft.Page):
+async def main(page: ft.Page):
     page.title = "Flet Sample"
-    page.window_width = 520
-    page.window_height = 420
+    page.window.width = 520
+    page.window.height = 420
     page.padding = 20
 
-    # --- 1. CSV file path input (with optional Browse button) ---
+    # --- 1. FilePicker — now a service in Flet 1.0, added to page.services ---
+    file_picker = ft.FilePicker()
+    page.services.append(file_picker)
+
     csv_path_field = ft.TextField(
         label="CSV File Path",
         hint_text="e.g. /path/to/data.csv",
         expand=True,
     )
 
-    def on_file_picked(e: ft.FilePickerResultEvent):
-        if e.files:
-            csv_path_field.value = e.files[0].path
+    async def on_browse(e):
+        result = await file_picker.pick_files_async(
+            allowed_extensions=["csv"],
+            allow_multiple=False,
+        )
+        if result and result.files:
+            csv_path_field.value = result.files[0].path
             page.update()
-
-    file_picker = ft.FilePicker(on_result=on_file_picked)
 
     browse_button = ft.ElevatedButton(
         "Browse",
         icon=ft.Icons.FOLDER_OPEN,
-        on_click=lambda _: file_picker.pick_files(
-            allowed_extensions=["csv"],
-            allow_multiple=False,
-        ),
+        on_click=on_browse,
     )
 
     # --- 2. Dropdown with 2 values ---
@@ -63,7 +66,7 @@ def main(page: ft.Page):
     progress_bar = ft.ProgressBar(width=460, value=0)
     status_text = ft.Text("Ready")
 
-    def run_process(e):
+    async def run_process(e):
         if not csv_path_field.value:
             status_text.value = "Please select a CSV file first."
             page.update()
@@ -89,7 +92,7 @@ def main(page: ft.Page):
         for i in range(batch_size + 1):
             progress_bar.value = i / batch_size
             page.update()
-            time.sleep(0.02)
+            await asyncio.sleep(0.02)
 
         status_text.value = "Done!"
         run_button.disabled = False
@@ -101,8 +104,6 @@ def main(page: ft.Page):
         on_click=run_process,
     )
 
-    # Register FilePicker after page.add() — Flet requires the page session
-    # to be initialized before overlay controls can be registered.
     page.add(
         ft.Text("CSV Processor", size=22, weight=ft.FontWeight.BOLD),
         ft.Row([csv_path_field, browse_button]),
@@ -113,8 +114,6 @@ def main(page: ft.Page):
         progress_bar,
         run_button,
     )
-    page.overlay.append(file_picker)
-    page.update()
 
 
 if __name__ == "__main__":
