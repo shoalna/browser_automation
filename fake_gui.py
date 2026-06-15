@@ -29,8 +29,6 @@ def main(page: ft.Page):
             page.update()
 
     file_picker = ft.FilePicker(on_result=on_file_picked)
-    page.overlay.append(file_picker)
-    page.update()
 
     browse_button = ft.ElevatedButton(
         "Browse",
@@ -103,6 +101,8 @@ def main(page: ft.Page):
         on_click=run_process,
     )
 
+    # Register FilePicker after page.add() — Flet requires the page session
+    # to be initialized before overlay controls can be registered.
     page.add(
         ft.Text("CSV Processor", size=22, weight=ft.FontWeight.BOLD),
         ft.Row([csv_path_field, browse_button]),
@@ -113,6 +113,8 @@ def main(page: ft.Page):
         progress_bar,
         run_button,
     )
+    page.overlay.append(file_picker)
+    page.update()
 
 
 if __name__ == "__main__":
