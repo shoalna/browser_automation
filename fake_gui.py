@@ -6,14 +6,15 @@ Run with:
     python fake_gui.py
 """
 
+import asyncio
 import time
 import flet as ft
 
 
-def main(page: ft.Page):
+async def main(page: ft.Page):
     page.title = "Flet Sample"
-    page.window_width = 520
-    page.window_height = 420
+    page.window.width = 520
+    page.window.height = 420
     page.padding = 20
 
     # --- 1. CSV file path input ---
@@ -23,22 +24,23 @@ def main(page: ft.Page):
         expand=True,
     )
 
-    def on_file_picked(e: ft.FilePickerResultEvent):
-        if e.files:
-            csv_path_field.value = e.files[0].path
-            page.update()
-
-    # FilePicker in Flet 0.85 — add to page.overlay with on_result callback
-    file_picker = ft.FilePicker(on_result=on_file_picked)
+    # FilePicker in Flet 0.85 — service, async API, no on_result constructor arg
+    file_picker = ft.FilePicker()
     page.overlay.append(file_picker)
+
+    async def on_browse(e):
+        result = await file_picker.pick_files_async(
+            allowed_extensions=["csv"],
+            allow_multiple=False,
+        )
+        if result and result.files:
+            csv_path_field.value = result.files[0].path
+            page.update()
 
     browse_button = ft.ElevatedButton(
         "Browse",
-        icon=ft.icons.FOLDER_OPEN,
-        on_click=lambda _: file_picker.pick_files(
-            allowed_extensions=["csv"],
-            allow_multiple=False,
-        ),
+        icon=ft.Icons.FOLDER_OPEN,
+        on_click=on_browse,
     )
 
     # --- 2. Dropdown with 2 values ---
@@ -64,7 +66,7 @@ def main(page: ft.Page):
     progress_bar = ft.ProgressBar(width=460, value=0)
     status_text = ft.Text("Ready")
 
-    def run_process(e):
+    async def run_process(e):
         if not csv_path_field.value:
             status_text.value = "Please select a CSV file first."
             page.update()
@@ -90,7 +92,7 @@ def main(page: ft.Page):
         for i in range(batch_size + 1):
             progress_bar.value = i / batch_size
             page.update()
-            time.sleep(0.02)
+            await asyncio.sleep(0.02)
 
         status_text.value = "Done!"
         run_button.disabled = False
@@ -98,7 +100,7 @@ def main(page: ft.Page):
 
     run_button = ft.ElevatedButton(
         "Run",
-        icon=ft.icons.PLAY_ARROW,
+        icon=ft.Icons.PLAY_ARROW,
         on_click=run_process,
     )
 
