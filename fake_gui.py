@@ -30,6 +30,7 @@ def main(page: ft.Page):
 
     file_picker = ft.FilePicker(on_result=on_file_picked)
     page.overlay.append(file_picker)
+    page.update()
 
     browse_button = ft.ElevatedButton(
         "Browse",
