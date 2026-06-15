@@ -1,13 +1,12 @@
 """
-Flet GUI sample (compatible with Flet 0.85).
+Flet GUI sample (compatible with Flet 0.85.3).
 
 Run with:
-    pip install "flet==0.85"
+    pip install "flet==0.85.3"
     python fake_gui.py
 """
 
 import asyncio
-import time
 import flet as ft
 
 
@@ -17,6 +16,11 @@ async def main(page: ft.Page):
     page.window.height = 420
     page.padding = 20
 
+    # --- FilePicker — service in Flet 0.85, added to page.services ---
+    # pick_files() returns list[FilePickerFile] directly, no on_result callback
+    file_picker = ft.FilePicker()
+    page.services.append(file_picker)
+
     # --- 1. CSV file path input ---
     csv_path_field = ft.TextField(
         label="CSV File Path",
@@ -24,17 +28,13 @@ async def main(page: ft.Page):
         expand=True,
     )
 
-    # FilePicker in Flet 0.85 — service, async API, no on_result constructor arg
-    file_picker = ft.FilePicker()
-    page.overlay.append(file_picker)
-
     async def on_browse(e):
-        result = await file_picker.pick_files_async(
+        files = file_picker.pick_files(
             allowed_extensions=["csv"],
             allow_multiple=False,
         )
-        if result and result.files:
-            csv_path_field.value = result.files[0].path
+        if files:
+            csv_path_field.value = files[0].path
             page.update()
 
     browse_button = ft.ElevatedButton(
