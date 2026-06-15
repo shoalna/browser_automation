@@ -1,45 +1,44 @@
 """
-Flet GUI sample.
+Flet GUI sample (compatible with Flet 0.85).
 
 Run with:
-    pip install flet
+    pip install "flet==0.85"
     python fake_gui.py
 """
 
-import asyncio
 import time
 import flet as ft
 
 
-async def main(page: ft.Page):
+def main(page: ft.Page):
     page.title = "Flet Sample"
-    page.window.width = 520
-    page.window.height = 420
+    page.window_width = 520
+    page.window_height = 420
     page.padding = 20
 
-    # --- 1. FilePicker — now a service in Flet 1.0, added to page.services ---
-    file_picker = ft.FilePicker()
-    page.services.append(file_picker)
-
+    # --- 1. CSV file path input ---
     csv_path_field = ft.TextField(
         label="CSV File Path",
         hint_text="e.g. /path/to/data.csv",
         expand=True,
     )
 
-    async def on_browse(e):
-        result = await file_picker.pick_files_async(
-            allowed_extensions=["csv"],
-            allow_multiple=False,
-        )
-        if result and result.files:
-            csv_path_field.value = result.files[0].path
+    def on_file_picked(e: ft.FilePickerResultEvent):
+        if e.files:
+            csv_path_field.value = e.files[0].path
             page.update()
+
+    # FilePicker in Flet 0.85 — add to page.overlay with on_result callback
+    file_picker = ft.FilePicker(on_result=on_file_picked)
+    page.overlay.append(file_picker)
 
     browse_button = ft.ElevatedButton(
         "Browse",
-        icon=ft.Icons.FOLDER_OPEN,
-        on_click=on_browse,
+        icon=ft.icons.FOLDER_OPEN,
+        on_click=lambda _: file_picker.pick_files(
+            allowed_extensions=["csv"],
+            allow_multiple=False,
+        ),
     )
 
     # --- 2. Dropdown with 2 values ---
@@ -59,14 +58,13 @@ async def main(page: ft.Page):
         value="100",
         width=460,
         keyboard_type=ft.KeyboardType.NUMBER,
-        input_filter=ft.NumbersOnlyInputFilter(),
     )
 
     # --- 4. Progress bar ---
     progress_bar = ft.ProgressBar(width=460, value=0)
     status_text = ft.Text("Ready")
 
-    async def run_process(e):
+    def run_process(e):
         if not csv_path_field.value:
             status_text.value = "Please select a CSV file first."
             page.update()
@@ -92,7 +90,7 @@ async def main(page: ft.Page):
         for i in range(batch_size + 1):
             progress_bar.value = i / batch_size
             page.update()
-            await asyncio.sleep(0.02)
+            time.sleep(0.02)
 
         status_text.value = "Done!"
         run_button.disabled = False
@@ -100,7 +98,7 @@ async def main(page: ft.Page):
 
     run_button = ft.ElevatedButton(
         "Run",
-        icon=ft.Icons.PLAY_ARROW,
+        icon=ft.icons.PLAY_ARROW,
         on_click=run_process,
     )
 
