@@ -6,6 +6,7 @@ Run with:
     python fake_gui.py
 """
 
+import threading
 import time
 import flet as ft
 
@@ -92,14 +93,16 @@ def main(page: ft.Page):
         progress_bar.value = 0
         page.update()
 
-        for i in range(batch_size + 1):
-            progress_bar.value = i / batch_size
+        def worker():
+            for i in range(batch_size + 1):
+                progress_bar.value = i / batch_size
+                page.update()
+                time.sleep(0.02)
+            status_text.value = "Done!"
+            run_button.disabled = False
             page.update()
-            time.sleep(0.02)
 
-        status_text.value = "Done!"
-        run_button.disabled = False
-        page.update()
+        threading.Thread(target=worker, daemon=True).start()
 
     run_button = ft.ElevatedButton(
         "Run",
