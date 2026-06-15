@@ -29,7 +29,7 @@ async def main(page: ft.Page):
     )
 
     async def on_browse(e):
-        files = file_picker.pick_files(
+        files = await file_picker.pick_files(
             allowed_extensions=["csv"],
             allow_multiple=False,
         )
