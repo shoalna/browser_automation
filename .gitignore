@@ -7,6 +7,8 @@ dist/
 build/
 *.png
 *.json
+# Local scratch tests (smoke.py, videos, caches) — keep out of git
+real_test/
 
 # Local secrets — never commit
 .env

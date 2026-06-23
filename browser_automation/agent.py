@@ -166,11 +166,13 @@ class AgentResolver:
 
     def _ensure_client(self) -> anthropic.Anthropic:
         if self._client is None:
-            self._client = (
-                anthropic.Anthropic(api_key=self._api_key)
-                if self._api_key
-                else anthropic.Anthropic()
-            )
+            # Bump retries above the SDK default of 2 so transient overloads
+            # (429 / 500 / 529) during a spike are absorbed with backoff rather
+            # than aborting the workflow mid-run.
+            kwargs: dict = {"max_retries": 5}
+            if self._api_key:
+                kwargs["api_key"] = self._api_key
+            self._client = anthropic.Anthropic(**kwargs)
         return self._client
 
     # -- public entry point -------------------------------------------------
@@ -227,9 +229,37 @@ class AgentResolver:
             return count >= 1
         return count == 1
 
+    def _grab_html(self, target) -> str:
+        """Return cleaned HTML, waiting once for content if the DOM looks empty.
+
+        Guards the common race where an ``*_agent`` step fires right after a
+        navigation/SPA transition: the DOM is still a blank shell, so the LLM
+        would get empty HTML and fail. If the body has almost no elements, wait
+        briefly for it to populate, then re-grab.
+        """
+        if self._dom_empty(target):
+            logger.debug("agent: DOM looks empty, waiting for content to render")
+            try:
+                target.wait_for_function(
+                    "() => !!document.body && document.body.querySelectorAll('*').length >= 3",
+                    timeout=5000,
+                )
+            except Exception:
+                pass  # fall through; the LLM will report if it's still empty
+        return target.evaluate(_CLEAN_JS)
+
+    @staticmethod
+    def _dom_empty(target) -> bool:
+        try:
+            return bool(target.evaluate(
+                "() => !document.body || document.body.querySelectorAll('*').length < 3"
+            ))
+        except Exception:
+            return False
+
     def _llm_resolve(self, target, method: str, description: str, multi: bool) -> str:
-        html = target.evaluate(_CLEAN_JS)
-        messages = [{"role": "user", "content": self._user_prompt(description, multi, html)}]
+        html = self._grab_html(target)
+        messages = [{"role": "user", "content": self._user_prompt(description, method, multi, html)}]
 
         for attempt in range(2):  # initial attempt + one re-ask
             result = self._call(messages)
@@ -286,8 +316,26 @@ class AgentResolver:
         except json.JSONDecodeError:
             return {"found": False, "xpath": "", "reason": "model returned invalid JSON"}
 
-    @staticmethod
-    def _user_prompt(description: str, multi: bool, html: str) -> str:
+    # Per-action guidance so the XPath targets the right *kind* of element —
+    # e.g. a "type" action must hit the editable field, not its <label>.
+    _ACTION_HINT = {
+        "click": "Target the interactive element to click (button, link, menu item, tab, checkbox, etc.).",
+        "type": (
+            "Target the EDITABLE form field to type into — an <input>, <textarea>, "
+            "<select>, or an element with [contenteditable]. Do NOT target a <label>, "
+            "<span>, or other static text. If the description names a field by its "
+            "label text, find the input control associated with that label (e.g. via "
+            "@id matching the label's @for, or the nearest input within the same field "
+            "container)."
+        ),
+        "select": "Target the <select> dropdown element itself.",
+        "hover": "Target the element to hover over.",
+        "extract": "Target the element whose text or attribute should be read.",
+        "extract_all": "Target the elements whose text or attribute should be read.",
+    }
+
+    @classmethod
+    def _user_prompt(cls, description: str, method: str, multi: bool, html: str) -> str:
         if multi:
             target_line = (
                 "Find ALL elements matching this description (this targets a "
@@ -298,9 +346,12 @@ class AgentResolver:
                 "Find THE SINGLE element matching this description (the XPath "
                 "MUST match exactly one element):"
             )
+        hint = cls._ACTION_HINT.get(method, "")
+        hint_block = f"{hint}\n\n" if hint else ""
         return (
             f"{target_line}\n\n"
             f"\"{description}\"\n\n"
+            f"{hint_block}"
             "Here is the cleaned page HTML:\n\n"
             f"{html}"
         )

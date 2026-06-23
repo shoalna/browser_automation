@@ -209,6 +209,8 @@ browser.run()
 | `http_credentials` | `tuple[str, str] \| None` | `None` | `(username, password)` for HTTP Basic Auth |
 | `state_file` | `str \| None` | `None` | Path to session JSON (load + save) |
 | `screenshot_on_failure` | `bool` | `False` | Auto-screenshot on action errors |
+| `record_video_dir` | `str \| None` | `None` | Save a `.webm` video of the session to this directory |
+| `record_video_size` | `tuple[int,int] \| None` | `None` | Video resolution (defaults to viewport) |
 | `help` | `bool` | `False` | Enable LLM resolution of `*_agent` descriptions (see [Agent methods](#agent-llm-resolved-actions)) |
 | `agent_model` | `str` | `"claude-sonnet-4-6"` | Claude model used for `*_agent` resolution |
 | `agent_cache_file` | `str` | `".browser_automation_agent_cache.json"` | JSON cache of resolved XPaths |

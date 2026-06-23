@@ -110,6 +110,12 @@ class Browser:
             instead of closing it automatically. Useful for debugging —
             inspect the page state at the point of failure. Has no effect
             in headless mode.
+        record_video_dir: Directory to save a video recording of the whole
+            session (Playwright records the browser context). The ``.webm`` file
+            is written when ``.run()`` finishes and its path is logged. Works in
+            both headless and headed mode.
+        record_video_size: ``(width, height)`` of the recorded video. Defaults
+            to the viewport size when omitted.
         help: Enable "help mode" — permit live LLM calls to resolve the
             natural-language descriptions passed to the ``*_agent`` methods
             (:meth:`click_agent`, :meth:`type_agent`, …). The XPath cache is
@@ -172,6 +178,8 @@ class Browser:
         state_file: str | None = None,
         screenshot_on_failure: bool = False,
         keep_open_on_error: bool = False,
+        record_video_dir: str | None = None,
+        record_video_size: tuple[int, int] | None = None,
         help: bool = False,
         agent_model: str = "claude-sonnet-4-6",
         agent_cache_file: str = ".browser_automation_agent_cache.json",
@@ -186,6 +194,12 @@ class Browser:
         self._keep_open_on_error = keep_open_on_error
         self._state_file = state_file
         self._screenshot_on_failure = screenshot_on_failure
+        self._record_video_dir = record_video_dir
+        self._record_video_size = (
+            {"width": record_video_size[0], "height": record_video_size[1]}
+            if record_video_size
+            else None
+        )
 
         # Agent (LLM XPath resolution) config. The resolver is built lazily on
         # first *_agent step so non-agent workflows pay nothing.
@@ -286,6 +300,10 @@ class Browser:
             if os.path.exists(self._state_file):
                 context_kwargs["storage_state"] = self._state_file
                 logger.debug("loaded session state from %s", self._state_file)
+        if self._record_video_dir:
+            context_kwargs["record_video_dir"] = self._record_video_dir
+            context_kwargs["record_video_size"] = self._record_video_size or self._viewport
+            logger.debug("recording video to %s", self._record_video_dir)
 
         context = self._pw_browser.new_context(**context_kwargs)
         self._page = context.new_page()
@@ -297,9 +315,20 @@ class Browser:
                 if self._state_file:
                     self._page.context.storage_state(path=self._state_file)
                     logger.debug("saved session state to %s", self._state_file)
+                # The video file is finalized on context.close(); capture its
+                # path beforehand so we can report it.
+                video_path = None
+                if self._record_video_dir and self._page.video:
+                    try:
+                        video_path = self._page.video.path()
+                    except Exception:
+                        pass
                 context = self._page.context
                 self._page.close()
                 context.close()
+                if video_path:
+                    logger.info("video saved to %s", video_path)
+                    print(f"[browser_automation] video saved to {video_path}", flush=True)
         except Exception as exc:
             logger.debug("error closing page/context: %s", exc)
         try:
