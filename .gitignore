@@ -7,3 +7,10 @@ dist/
 build/
 *.png
 *.json
+
+# Local secrets — never commit
+.env
+
+# The agent XPath cache is a shareable artifact (URLs + XPaths, no secrets);
+# allow committing it so teammates / CI can run without an API key.
+!.browser_automation_agent_cache.json
