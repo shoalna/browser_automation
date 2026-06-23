@@ -110,6 +110,20 @@ class Browser:
             instead of closing it automatically. Useful for debugging —
             inspect the page state at the point of failure. Has no effect
             in headless mode.
+        help: Enable "help mode" — permit live LLM calls to resolve the
+            natural-language descriptions passed to the ``*_agent`` methods
+            (:meth:`click_agent`, :meth:`type_agent`, …). The XPath cache is
+            consulted regardless of this flag; ``help`` only governs whether a
+            *cache miss* may call the LLM. With ``help=False`` (default) a cache
+            miss raises :class:`~browser_automation.agent.AgentResolutionError`.
+        agent_model: Claude model used for ``*_agent`` resolution. Defaults to
+            ``"claude-sonnet-4-6"``; override (e.g. ``"claude-opus-4-8"``) for
+            harder pages.
+        agent_cache_file: Path to the JSON file storing resolved XPaths, keyed
+            by ``(url, method, description)``. Written through after each new
+            resolution so the LLM is paid at most once per element.
+        agent_api_key: Explicit Anthropic API key. If omitted, the SDK reads
+            ``ANTHROPIC_API_KEY`` from the environment.
         verbose: Set to ``True`` to emit DEBUG-level log records on every
             action. Equivalent to calling
             ``logging.getLogger("browser_automation").setLevel(logging.DEBUG)``.
@@ -158,6 +172,10 @@ class Browser:
         state_file: str | None = None,
         screenshot_on_failure: bool = False,
         keep_open_on_error: bool = False,
+        help: bool = False,
+        agent_model: str = "claude-sonnet-4-6",
+        agent_cache_file: str = ".browser_automation_agent_cache.json",
+        agent_api_key: str | None = None,
         verbose: bool = False,
     ) -> None:
         self._browser_type = browser
@@ -168,6 +186,14 @@ class Browser:
         self._keep_open_on_error = keep_open_on_error
         self._state_file = state_file
         self._screenshot_on_failure = screenshot_on_failure
+
+        # Agent (LLM XPath resolution) config. The resolver is built lazily on
+        # first *_agent step so non-agent workflows pay nothing.
+        self._help = help
+        self._agent_model = agent_model
+        self._agent_cache_file = agent_cache_file
+        self._agent_api_key = agent_api_key
+        self._resolver = None
 
         if verbose:
             logging.getLogger("browser_automation").setLevel(logging.DEBUG)
@@ -309,6 +335,34 @@ class Browser:
             else:
                 logger.error("step failed — %s", msg)
                 raise
+
+    # ------------------------------------------------------------------
+    # Agent (LLM XPath resolution) internals
+    # ------------------------------------------------------------------
+
+    def _ensure_resolver(self):
+        """Build the agent resolver lazily on first use."""
+        if self._resolver is None:
+            from .agent import AgentCache, AgentResolver
+            self._resolver = AgentResolver(
+                model=self._agent_model,
+                cache=AgentCache(self._agent_cache_file),
+                api_key=self._agent_api_key,
+            )
+        return self._resolver
+
+    def _resolve_agent(self, method: str, description: str, *, multi: bool) -> str:
+        """Resolve *description* to an XPath against the active target.
+
+        The cache is keyed by the real page URL (even in frame mode); the DOM
+        snapshot and validation use the active target, so frames resolve
+        correctly.
+        """
+        target = self._ensure_target()
+        url = self._ensure_page().url
+        return self._ensure_resolver().resolve(
+            target, url, method, description, multi=multi, help=self._help
+        )
 
     # ------------------------------------------------------------------
     # Escape hatch
@@ -1220,6 +1274,136 @@ class Browser:
             lambda: action_repeat_until(self._ensure_target(), selector, fn, self, max_iterations),
             (), {},
         ))
+        return self
+
+    # ------------------------------------------------------------------
+    # Agent — LLM-resolved actions (describe the element in natural language)
+    # ------------------------------------------------------------------
+
+    def click_agent(self, description: str, *, optional: bool = False) -> "Browser":
+        """Click the element matching a natural-language *description*.
+
+        Resolves *description* to an XPath via the cache (or the LLM, when
+        ``help=True``) at run time, then clicks it. See :meth:`click`.
+
+        Args:
+            description: Natural-language description of the element — usually the
+                visible text (``"Add to cart"``) but it can be richer
+                (``"the cart icon in the top-right header"``).
+            optional: If ``True``, a failure (including resolution failure) is
+                recorded in :attr:`Result.errors` instead of raising.
+
+        Returns:
+            ``self`` for chaining.
+
+        Examples:
+            ::
+
+                Browser(help=True).goto(url).click_agent("Log in").run()
+        """
+        def step():
+            xpath = self._resolve_agent("click", description, multi=False)
+            action_click(self._ensure_target(), f"xpath={xpath}")
+
+        self._steps.append((self._run_step, (step, (), {}, f"click_agent({description!r})", optional), {}))
+        return self
+
+    def type_agent(self, description: str, text: str, *, optional: bool = False) -> "Browser":
+        """Type *text* into the element matching *description*.
+
+        See :meth:`type`. The element is resolved by description at run time.
+
+        Examples:
+            ::
+
+                Browser(help=True).goto(url).type_agent("the search box", "playwright").run()
+        """
+        def step():
+            xpath = self._resolve_agent("type", description, multi=False)
+            action_type(self._ensure_target(), f"xpath={xpath}", text)
+
+        self._steps.append((self._run_step, (step, (), {}, f"type_agent({description!r})", optional), {}))
+        return self
+
+    def hover_agent(self, description: str, *, optional: bool = False) -> "Browser":
+        """Hover over the element matching *description*. See :meth:`hover`."""
+        def step():
+            xpath = self._resolve_agent("hover", description, multi=False)
+            action_hover(self._ensure_target(), f"xpath={xpath}")
+
+        self._steps.append((self._run_step, (step, (), {}, f"hover_agent({description!r})", optional), {}))
+        return self
+
+    def select_agent(self, description: str, value: str, *, optional: bool = False) -> "Browser":
+        """Select option *value* in the ``<select>`` matching *description*.
+
+        See :meth:`select`. The ``<select>`` element is resolved by description.
+        """
+        def step():
+            xpath = self._resolve_agent("select", description, multi=False)
+            action_select(self._ensure_target(), f"xpath={xpath}", value)
+
+        self._steps.append((self._run_step, (step, (), {}, f"select_agent({description!r}, {value!r})", optional), {}))
+        return self
+
+    def extract_agent(
+        self,
+        description: str,
+        *,
+        name: str,
+        attr: str | None = None,
+        optional: bool = False,
+    ) -> "Browser":
+        """Extract a single value from the element matching *description*.
+
+        See :meth:`extract`. Resolution is single-target (the description must
+        identify exactly one element).
+
+        Examples:
+            ::
+
+                result = (
+                    Browser(help=True)
+                    .goto(url)
+                    .extract_agent("the page heading", name="title")
+                    .run()
+                )
+        """
+        def step():
+            xpath = self._resolve_agent("extract", description, multi=False)
+            action_extract(self._ensure_target(), f"xpath={xpath}", name, attr, self._store)
+
+        self._steps.append((self._run_step, (step, (), {}, f"extract_agent({description!r}, name={name!r})", optional), {}))
+        return self
+
+    def extract_all_agent(
+        self,
+        description: str,
+        *,
+        name: str,
+        attr: str | None = None,
+    ) -> "Browser":
+        """Extract all values matching a *description* of a collection.
+
+        See :meth:`extract_all`. Resolution is multi-target — the description
+        names a set of elements (e.g. ``"the product titles"``) and the XPath is
+        allowed to match many.
+
+        Examples:
+            ::
+
+                result = (
+                    Browser(help=True)
+                    .goto("https://news.ycombinator.com")
+                    .extract_all_agent("the story headline links", name="headlines")
+                    .run()
+                )
+        """
+        def step():
+            xpath = self._resolve_agent("extract_all", description, multi=True)
+            action_extract_all(self._ensure_target(), f"xpath={xpath}", name, attr, self._store)
+
+        self._steps.append((step, (), {}))
         return self
 
     # ------------------------------------------------------------------
