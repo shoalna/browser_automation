@@ -193,7 +193,7 @@ class AgentResolver:
         """
         cached = self._cache.get(url, method, description)
         if cached is not None:
-            if self._matches(target, cached, multi):
+            if self._validate(target, cached, method, multi)[0]:
                 logger.debug("agent cache hit: %s -> %s", description, cached)
                 return cached
             logger.debug("agent cache stale for %r (re-resolving)", description)
@@ -223,11 +223,44 @@ class AgentResolver:
         except Exception:
             return -1  # malformed XPath
 
-    def _matches(self, target, xpath: str, multi: bool) -> bool:
+    def _editable(self, target, xpath: str) -> bool:
+        """True if the first matched element can be typed into (input/textarea/
+        select/contenteditable)."""
+        try:
+            return bool(target.locator(f"xpath={xpath}").first.evaluate(
+                "el => { const t = el.tagName.toLowerCase();"
+                " return t === 'input' || t === 'textarea' || t === 'select'"
+                " || el.isContentEditable === true; }"
+            ))
+        except Exception:
+            return False
+
+    def _validate(self, target, xpath: str, method: str, multi: bool) -> tuple[bool, str]:
+        """Validate a resolved XPath against the live target.
+
+        Returns ``(ok, reason)``. Applies the method-aware rules: collections
+        need >=1 match, single targets exactly 1, and ``type`` targets must be
+        an editable field (not a <label>/<span>). Used for both fresh
+        resolutions and cache-hit checks, so a stale entry that now matches the
+        wrong kind of element is re-resolved rather than reused.
+        """
         count = self._match_count(target, xpath)
-        if multi:
-            return count >= 1
-        return count == 1
+        if count < 0:
+            return False, f"XPath {xpath!r} is not valid"
+        if count == 0:
+            return False, f"XPath {xpath!r} matched no elements"
+        if not multi and count > 1:
+            return False, (
+                f"XPath {xpath!r} matched {count} elements but exactly one is "
+                "required — make it uniquely identifying"
+            )
+        if method == "type" and not self._editable(target, xpath):
+            return False, (
+                f"XPath {xpath!r} resolved to a non-editable element (e.g. a "
+                "<label> or <span>) — target the actual input/textarea/select/"
+                "contenteditable field for the described label"
+            )
+        return True, ""
 
     def _grab_html(self, target) -> str:
         """Return cleaned HTML, waiting once for content if the DOM looks empty.
@@ -268,20 +301,9 @@ class AgentResolver:
                 reason = result.get("reason") or "model could not identify the element"
             else:
                 xpath = result.get("xpath") or ""
-                count = self._match_count(target, xpath)
-                if count == 1 or (multi and count >= 1):
+                ok, reason = self._validate(target, xpath, method, multi)
+                if ok:
                     return xpath
-                if count <= 0:
-                    reason = (
-                        f"XPath {xpath!r} matched no elements"
-                        if count == 0
-                        else f"XPath {xpath!r} is not valid"
-                    )
-                else:
-                    reason = (
-                        f"XPath {xpath!r} matched {count} elements but exactly one "
-                        "is required — make it uniquely identifying"
-                    )
 
             if attempt == 0:
                 messages.append({"role": "assistant", "content": json.dumps(result)})
