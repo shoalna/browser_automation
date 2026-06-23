@@ -177,6 +177,12 @@ class Browser:
         self._pw_browser: PlaywrightBrowser | None = None
         self._page: Page | None = None
 
+        # Frame mode state — when _active_frame is set, locator-based actions
+        # target that frame instead of the main page. _frame_stack supports
+        # nested enter_frame() calls.
+        self._active_frame = None
+        self._frame_stack: list = []
+
         # Workflow state
         self._steps: list[tuple[Callable, tuple, dict]] = []
         self._store: dict = {}
@@ -205,6 +211,19 @@ class Browser:
         if self._page is None:
             raise RuntimeError("No active page. This should only be called inside run().")
         return self._page
+
+    def _ensure_target(self):
+        """Return the current action target — the active frame if in frame mode,
+        otherwise the main page.
+
+        Locator-based actions (click, type, extract, …) use this so they follow
+        ``enter_frame()`` / ``exit_frame()``. Page-level actions (keyboard,
+        screenshot, pause, goto) deliberately use :meth:`_ensure_page` instead so
+        they always operate on the real page.
+        """
+        if self._active_frame is not None:
+            return self._active_frame
+        return self._ensure_page()
 
     def _start(self, playwright: Playwright) -> None:
         """Start the browser and create the page inside the playwright context."""
@@ -378,7 +397,7 @@ class Browser:
                 Browser().goto(url).click("#cookie-accept", optional=True).run()
         """
         def step():
-            action_click(self._ensure_page(), selector)
+            action_click(self._ensure_target(), selector)
 
         self._steps.append((self._run_step, (step, (), {}, f"click({selector!r})", optional), {}))
         return self
@@ -400,7 +419,7 @@ class Browser:
                 Browser().goto(url).type("#search", "playwright").click("#go").run()
         """
         def step():
-            action_type(self._ensure_page(), selector, text)
+            action_type(self._ensure_target(), selector, text)
 
         self._steps.append((self._run_step, (step, (), {}, f"type({selector!r})", optional), {}))
         return self
@@ -451,7 +470,7 @@ class Browser:
                 Browser().goto(url).select("#country", "US").run()
         """
         def step():
-            action_select(self._ensure_page(), selector, value)
+            action_select(self._ensure_target(), selector, value)
 
         self._steps.append((self._run_step, (step, (), {}, f"select({selector!r}, {value!r})", optional), {}))
         return self
@@ -472,7 +491,7 @@ class Browser:
                 Browser().goto(url).hover("#menu").click("#submenu-item").run()
         """
         def step():
-            action_hover(self._ensure_page(), selector)
+            action_hover(self._ensure_target(), selector)
 
         self._steps.append((self._run_step, (step, (), {}, f"hover({selector!r})", optional), {}))
         return self
@@ -510,7 +529,7 @@ class Browser:
                 Browser().goto(url).scroll(y=800).run()
         """
         self._steps.append((
-            lambda: action_scroll(self._ensure_page(), selector, y),
+            lambda: action_scroll(self._ensure_target(), selector, y),
             (), {},
         ))
         return self
@@ -601,7 +620,7 @@ class Browser:
                 Browser().goto(url).click("[type=submit]").wait().run()
         """
         self._steps.append((
-            lambda: action_wait(self._ensure_page(), selector, seconds),
+            lambda: action_wait(self._ensure_target(), selector, seconds),
             (), {},
         ))
         return self
@@ -647,7 +666,7 @@ class Browser:
                 print(result["link"])   # "https://www.iana.org/domains/example"
         """
         def step():
-            action_extract(self._ensure_page(), selector, name, attr, self._store)
+            action_extract(self._ensure_target(), selector, name, attr, self._store)
 
         self._steps.append((self._run_step, (step, (), {}, f"extract({selector!r}, name={name!r})", optional), {}))
         return self
@@ -690,7 +709,7 @@ class Browser:
                 )
         """
         self._steps.append((
-            lambda: action_extract_all(self._ensure_page(), selector, name, attr, self._store),
+            lambda: action_extract_all(self._ensure_target(), selector, name, attr, self._store),
             (), {},
         ))
         return self
@@ -764,7 +783,7 @@ class Browser:
             if fname is None:
                 ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 fname = f"page_{ts}.html"
-            html = self._ensure_page().content()
+            html = self._ensure_target().content()
             with open(fname, "w", encoding="utf-8") as f:
                 f.write(html)
             logger.debug("saved HTML to %s (%d bytes)", fname, len(html))
@@ -882,9 +901,113 @@ class Browser:
 
                 browser.run()
         """
-        page = self._ensure_page()
-        element = page.locator(selector).first.element_handle()
+        target = self._ensure_target()
+        element = target.locator(selector).first.element_handle()
         return element.content_frame()
+
+    def enter_frame(self, selector: str, *, optional: bool = False) -> "Browser":
+        """Enter "frame mode": scope all subsequent actions to an iframe.
+
+        Resolves the iframe **once** and keeps it active until the matching
+        :meth:`exit_frame`. Every locator-based action that follows (``click``,
+        ``type``, ``extract``, ``wait(selector)``, ``each``, …) operates on the
+        iframe's document with no per-action frame re-resolution.
+
+        Page-level actions — ``press_key``, ``screenshot``, ``pause``, ``goto``
+        — always target the real page, even in frame mode.
+
+        Calls nest: ``enter_frame`` pushes onto an internal stack, so you can
+        enter a frame within a frame and ``exit_frame`` unwinds one level at a
+        time. Always pair each ``enter_frame`` with an ``exit_frame``; frame
+        mode is reset automatically at the end of :meth:`run`.
+
+        Note: the resolved frame reference is held for the lifetime of frame
+        mode. A navigation that destroys and recreates the iframe invalidates
+        it — exit and re-enter after such a navigation.
+
+        Args:
+            selector: CSS selector of the ``<iframe>`` element.
+            optional: If ``True`` and the iframe is not found, record a soft
+                failure in :attr:`Result.errors` instead of raising. Frame mode
+                is *not* entered, but a balancing ``exit_frame`` is still safe.
+
+        Returns:
+            ``self`` for chaining.
+
+        Examples:
+            ::
+
+                # Several interactions, one frame resolution
+                result = (
+                    Browser()
+                    .goto("https://example.com")
+                    .wait("iframe#editor")
+                    .enter_frame("iframe#editor")
+                    .type("#title", "Hello")
+                    .click("#bold")
+                    .type("#body", "world")
+                    .extract("h1", name="heading")
+                    .exit_frame()
+                    .extract("title", name="page_title")
+                    .run()
+                )
+
+                # Nested iframes
+                Browser()
+                    .goto(url)
+                    .enter_frame("iframe#outer")
+                    .enter_frame("iframe#inner")
+                    .click("#deep-button")
+                    .exit_frame()   # back to outer
+                    .exit_frame()   # back to page
+                    .run()
+        """
+        def step():
+            target = self._ensure_target()
+            # Push the current context first so exit_frame() always balances,
+            # even if resolution fails under optional=True.
+            self._frame_stack.append(self._active_frame)
+            try:
+                element = target.locator(selector).first.element_handle()
+                frame = element.content_frame()
+            except Exception as exc:
+                msg = f"enter_frame({selector!r}): {exc}"
+                if optional:
+                    logger.warning("optional enter_frame failed — %s", msg)
+                    self._errors.append(msg)
+                    return  # leave _active_frame unchanged; stack stays balanced
+                self._frame_stack.pop()
+                raise
+            logger.debug("enter_frame %s", selector)
+            self._active_frame = frame
+
+        self._steps.append((step, (), {}))
+        return self
+
+    def exit_frame(self) -> "Browser":
+        """Exit the current frame, restoring the parent context.
+
+        Pops one level off the frame stack established by :meth:`enter_frame` —
+        returning to the outer iframe (if nested) or the main page. Calling
+        ``exit_frame`` when not in frame mode logs a warning and is a no-op.
+
+        Returns:
+            ``self`` for chaining.
+
+        Examples:
+            ::
+
+                Browser().goto(url).enter_frame("#f").click("#x").exit_frame().run()
+        """
+        def step():
+            if not self._frame_stack:
+                logger.warning("exit_frame() called outside frame mode — ignoring")
+                return
+            self._active_frame = self._frame_stack.pop()
+            logger.debug("exit_frame -> %s", "page" if self._active_frame is None else "frame")
+
+        self._steps.append((step, (), {}))
+        return self
 
     def within_frame(
         self,
@@ -895,9 +1018,10 @@ class Browser:
     ) -> "Browser":
         """Run *fn* with all actions scoped to an iframe.
 
-        Temporarily redirects every action inside *fn* to operate on the
-        iframe's document instead of the main page. The iframe context is
-        restored after *fn* returns.
+        Convenience wrapper around :meth:`enter_frame` / :meth:`exit_frame`:
+        enters the frame, lets *fn* queue actions against it, then exits. Prefer
+        ``enter_frame`` / ``exit_frame`` directly for long sequences or when the
+        scoping does not map cleanly onto a single callback.
 
         Args:
             selector: CSS selector of the ``<iframe>`` element.
@@ -943,36 +1067,9 @@ class Browser:
                     .within_frame("iframe#content", lambda b: b.save_html("iframe.html"))
                     .run()
         """
-        def step():
-            page = self._ensure_page()
-            try:
-                element = page.locator(selector).first.element_handle()
-                frame = element.content_frame()
-            except Exception as exc:
-                msg = f"within_frame({selector!r}): {exc}"
-                if optional:
-                    logger.warning("optional within_frame failed — %s", msg)
-                    self._errors.append(msg)
-                    return
-                raise
-
-            # fn(self) adds deferred steps to self._steps — capture them,
-            # remove from the main queue, then execute immediately inside
-            # the frame context before restoring the original page.
-            steps_before = len(self._steps)
-            fn(self)
-            frame_steps = self._steps[steps_before:]
-            self._steps = self._steps[:steps_before]
-
-            original_page = self._page
-            self._page = frame  # type: ignore[assignment]
-            try:
-                for fn_step, args, kwargs in frame_steps:
-                    fn_step(*args, **kwargs)
-            finally:
-                self._page = original_page
-
-        self._steps.append((step, (), {}))
+        self.enter_frame(selector, optional=optional)
+        fn(self)
+        self.exit_frame()
         return self
 
     # ------------------------------------------------------------------
@@ -1017,7 +1114,7 @@ class Browser:
                 ).run()
         """
         self._steps.append((
-            lambda: action_if_exists(self._ensure_page(), selector, fn, self),
+            lambda: action_if_exists(self._ensure_target(), selector, fn, self),
             (), {},
         ))
         return self
@@ -1050,7 +1147,7 @@ class Browser:
                 ).run()
         """
         self._steps.append((
-            lambda: action_each(self._ensure_page(), selector, fn, self),
+            lambda: action_each(self._ensure_target(), selector, fn, self),
             (), {},
         ))
         return self
@@ -1120,7 +1217,7 @@ class Browser:
                 )
         """
         self._steps.append((
-            lambda: action_repeat_until(self._ensure_page(), selector, fn, self, max_iterations),
+            lambda: action_repeat_until(self._ensure_target(), selector, fn, self, max_iterations),
             (), {},
         ))
         return self
@@ -1154,9 +1251,12 @@ class Browser:
         """
         with sync_playwright() as playwright:
             self._start(playwright)
-            # Snapshot and clear before iterating — within_frame appends to
-            # self._steps during execution; iterating the live list would cause
-            # those steps to run a second time after within_frame already ran them.
+            # Reset frame mode in case a previous run left it dirty.
+            self._active_frame = None
+            self._frame_stack.clear()
+            # Snapshot and clear before iterating — do() appends to self._steps
+            # during execution; iterating the live list would cause those steps
+            # to run a second time.
             steps_snapshot = list(self._steps)
             self._steps.clear()
             try:
@@ -1174,6 +1274,8 @@ class Browser:
             finally:
                 self._stop()
                 self._steps.clear()
+                self._active_frame = None
+                self._frame_stack.clear()
 
         result = Result(data=self._store, errors=self._errors)
         self._store = {}

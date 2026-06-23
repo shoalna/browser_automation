@@ -270,8 +270,27 @@ browser.run()
 
 | Method | Description |
 |---|---|
-| `.within_frame(selector, fn)` | Run `fn(browser)` with all actions scoped to the iframe |
+| `.enter_frame(selector, optional=False)` | Enter "frame mode" — scope subsequent actions to the iframe (resolved once; nests) |
+| `.exit_frame()` | Exit one frame level, back to the parent frame or page |
+| `.within_frame(selector, fn)` | Sugar for `enter_frame` → `fn(browser)` → `exit_frame` |
 | `.frame(selector)` | Return the raw Playwright `Frame` object (escape hatch) |
+
+`enter_frame` / `exit_frame` resolve the iframe a single time and keep it active across many actions — preferred over repeated `within_frame` calls on the same iframe. Page-level actions (`press_key`, `screenshot`, `pause`, `goto`) always target the real page, even in frame mode. Pair every `enter_frame` with an `exit_frame`; frame mode resets at the end of `run()`.
+
+```python
+result = (
+    Browser()
+    .goto(url)
+    .wait("iframe#editor")
+    .enter_frame("iframe#editor")
+    .type("#title", "Hello")
+    .click("#bold")
+    .extract("h1", name="heading")
+    .exit_frame()
+    .extract("title", name="page_title")
+    .run()
+)
+```
 
 ### Control flow
 

@@ -27,4 +27,4 @@ from .browser import Browser
 from .result import Result
 
 __all__ = ["Browser", "Result"]
-__version__ = "0.2.0"
+__version__ = "0.3.0"
