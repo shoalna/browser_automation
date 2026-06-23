@@ -209,6 +209,10 @@ browser.run()
 | `http_credentials` | `tuple[str, str] \| None` | `None` | `(username, password)` for HTTP Basic Auth |
 | `state_file` | `str \| None` | `None` | Path to session JSON (load + save) |
 | `screenshot_on_failure` | `bool` | `False` | Auto-screenshot on action errors |
+| `help` | `bool` | `False` | Enable LLM resolution of `*_agent` descriptions (see [Agent methods](#agent-llm-resolved-actions)) |
+| `agent_model` | `str` | `"claude-sonnet-4-6"` | Claude model used for `*_agent` resolution |
+| `agent_cache_file` | `str` | `".browser_automation_agent_cache.json"` | JSON cache of resolved XPaths |
+| `agent_api_key` | `str \| None` | `None` | Anthropic key (else `ANTHROPIC_API_KEY` from env) |
 | `verbose` | `bool` | `False` | Enable DEBUG-level logging |
 
 ---
@@ -301,6 +305,45 @@ result = (
 | `.each(selector, fn)` | Run `fn(browser, locator)` per element |
 | `.repeat(n, fn)` | Run `fn(browser)` exactly n times |
 | `.repeat_until(selector, fn, max_iterations=100)` | Run `fn(browser)` until selector appears |
+
+### Agent (LLM-resolved actions)
+
+Describe the element in natural language instead of writing a selector — Claude
+resolves it to a robust XPath at run time. Resolved XPaths are cached to a JSON
+file keyed by `(url, method, description)`, so the LLM is paid **at most once per
+element**; later runs read straight from the cache.
+
+| Method | Description |
+|---|---|
+| `.click_agent(description, optional=False)` | Click the described element |
+| `.type_agent(description, text, optional=False)` | Type into the described input |
+| `.hover_agent(description, optional=False)` | Hover the described element |
+| `.select_agent(description, value, optional=False)` | Select an option in the described `<select>` |
+| `.extract_agent(description, name=, attr=None, optional=False)` | Extract one value from the described element |
+| `.extract_all_agent(description, name=, attr=None)` | Extract all values from the described collection |
+
+```python
+from browser_automation import Browser
+
+result = (
+    Browser(help=True)                                   # help=True permits live LLM calls
+    .goto("https://news.ycombinator.com")
+    .extract_all_agent("the story headline links", name="headlines")
+    .run()
+)
+print(result["headlines"])
+```
+
+- **`help` gates only live LLM calls.** The cache is always consulted. With
+  `help=False` (default), a cache *miss* raises `AgentResolutionError` — so once
+  XPaths are cached (commit the cache file), production runs need no API key and
+  make no LLM calls.
+- **Requires** `ANTHROPIC_API_KEY` (or `agent_api_key=`) when a live call fires.
+- **Single-target methods require an unambiguous description** — if the resolved
+  XPath matches more than one element (even after one automatic re-ask), the call
+  raises rather than silently clicking the first match. `extract_all_agent` is the
+  exception: it expects many matches.
+- Works inside `enter_frame()` — resolution targets the active frame.
 
 ### Terminal
 

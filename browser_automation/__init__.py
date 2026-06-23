@@ -23,8 +23,9 @@ Quickstart
 See :class:`~browser_automation.browser.Browser` for the full API.
 """
 
+from .agent import AgentResolutionError
 from .browser import Browser
 from .result import Result
 
-__all__ = ["Browser", "Result"]
-__version__ = "0.3.0"
+__all__ = ["Browser", "Result", "AgentResolutionError"]
+__version__ = "0.4.0"
