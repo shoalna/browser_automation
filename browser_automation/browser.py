@@ -130,6 +130,12 @@ class Browser:
             resolution so the LLM is paid at most once per element.
         agent_api_key: Explicit Anthropic API key. If omitted, the SDK reads
             ``ANTHROPIC_API_KEY`` from the environment.
+        agent_wait: Seconds to pause before an ``*_agent`` step resolves via the
+            LLM, letting the page settle so the model sees the finished DOM.
+            Applied **only** on a live resolution (``help=True`` + cache miss) —
+            never on a cache hit — so the first/recording run is robust without
+            manual ``wait()`` calls and cached runs stay fast. Cached steps
+            instead wait briefly for their stored XPath to appear before use.
         verbose: Set to ``True`` to emit DEBUG-level log records on every
             action. Equivalent to calling
             ``logging.getLogger("browser_automation").setLevel(logging.DEBUG)``.
@@ -184,6 +190,7 @@ class Browser:
         agent_model: str = "claude-sonnet-4-6",
         agent_cache_file: str = ".browser_automation_agent_cache.json",
         agent_api_key: str | None = None,
+        agent_wait: float = 0,
         verbose: bool = False,
     ) -> None:
         self._browser_type = browser
@@ -207,6 +214,7 @@ class Browser:
         self._agent_model = agent_model
         self._agent_cache_file = agent_cache_file
         self._agent_api_key = agent_api_key
+        self._agent_wait = agent_wait
         self._resolver = None
 
         if verbose:
@@ -377,6 +385,7 @@ class Browser:
                 model=self._agent_model,
                 cache=AgentCache(self._agent_cache_file),
                 api_key=self._agent_api_key,
+                wait=self._agent_wait,
             )
         return self._resolver
 

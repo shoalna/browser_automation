@@ -158,10 +158,21 @@ _CLEAN_JS = """
 class AgentResolver:
     """Resolves natural-language descriptions to XPaths, cache-first, LLM on miss."""
 
-    def __init__(self, model: str, cache: AgentCache, api_key: str | None = None) -> None:
+    # How long a cache hit waits for its (known) XPath to appear before deciding
+    # it's stale — lets a cached step absorb a page still mid-transition.
+    _CACHE_HIT_WAIT_MS = 3000
+
+    def __init__(
+        self,
+        model: str,
+        cache: AgentCache,
+        api_key: str | None = None,
+        wait: float = 0,
+    ) -> None:
         self._model = model
         self._cache = cache
         self._api_key = api_key
+        self._wait = wait  # fixed settle (seconds) before an LLM resolution
         self._client: anthropic.Anthropic | None = None  # built lazily on first live call
 
     def _ensure_client(self) -> anthropic.Anthropic:
@@ -193,6 +204,16 @@ class AgentResolver:
         """
         cached = self._cache.get(url, method, description)
         if cached is not None:
+            # The cached XPath is the next-view anchor — wait briefly for it to
+            # appear so a view still mid-transition isn't mistaken for stale.
+            # Applies on every run (incl. help=False), so cached/production runs
+            # absorb navigations without manual waits.
+            try:
+                target.locator(f"xpath={cached}").first.wait_for(
+                    state="attached", timeout=self._CACHE_HIT_WAIT_MS
+                )
+            except Exception:
+                pass
             if self._validate(target, cached, method, multi)[0]:
                 logger.debug("agent cache hit: %s -> %s", description, cached)
                 return cached
@@ -291,6 +312,11 @@ class AgentResolver:
             return False
 
     def _llm_resolve(self, target, method: str, description: str, multi: bool) -> str:
+        # Fixed settle before reading the DOM for the LLM — only reached on an
+        # LLM resolution (help=True + cache miss/stale), never on a cache hit.
+        if self._wait:
+            logger.debug("agent: settling %.1fs before LLM resolution", self._wait)
+            target.wait_for_timeout(self._wait * 1000)
         html = self._grab_html(target)
         messages = [{"role": "user", "content": self._user_prompt(description, method, multi, html)}]
 

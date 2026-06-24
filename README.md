@@ -215,6 +215,7 @@ browser.run()
 | `agent_model` | `str` | `"claude-sonnet-4-6"` | Claude model used for `*_agent` resolution |
 | `agent_cache_file` | `str` | `".browser_automation_agent_cache.json"` | JSON cache of resolved XPaths |
 | `agent_api_key` | `str \| None` | `None` | Anthropic key (else `ANTHROPIC_API_KEY` from env) |
+| `agent_wait` | `float` | `0` | Seconds to settle before a *live* `*_agent` resolution (skipped on cache hits) |
 | `verbose` | `bool` | `False` | Enable DEBUG-level logging |
 
 ---
@@ -346,6 +347,12 @@ print(result["headlines"])
   raises rather than silently clicking the first match. `extract_all_agent` is the
   exception: it expects many matches.
 - Works inside `enter_frame()` — resolution targets the active frame.
+- **Page-settling is handled in two regimes.** On a cache hit, the step waits
+  briefly for its stored XPath (the next-view anchor) to appear, so cached runs
+  absorb navigations on their own. On a *live* resolution, set `agent_wait=N` to
+  pause N seconds first so the LLM sees the finished DOM — useful for the initial
+  recording run, skipped on cache hits. Explicit `.wait(...)` still works for
+  fine-grained control.
 
 ### Terminal
 
