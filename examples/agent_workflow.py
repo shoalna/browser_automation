@@ -20,8 +20,11 @@ Lessons baked into the comments below:
 
 - ``help=True`` permits live LLM resolution on a cache miss; resolved XPaths are
   cached to ``agent_cache_file`` so later runs reuse them with no API call.
-- Add a ``wait()`` after anything that navigates or loads content, or the next
-  ``*_agent`` step may resolve against a half-rendered page.
+- No manual ``wait()`` calls are needed between steps: ``agent_wait`` settles the
+  page before each *live* resolution (the first/recording run), and cache hits
+  wait briefly for the stored XPath to appear before use. Bump ``agent_wait`` if
+  a page is slow to render; drop to an explicit ``.wait("<selector>")`` only when
+  you need to gate on something other than the next step's own target.
 - Prefer a concrete description ("2026年6月25日") over a relative one ("明日"):
   the model can't reliably compute today's date.
 - ``type_agent`` targets the editable field even when you describe it by its
@@ -53,6 +56,7 @@ def main() -> int:
             help=True,                           # allow live LLM resolution on miss
             agent_cache_file=".agent_cache.json",
             record_video_dir="videos",           # optional: save a .webm of the run
+            agent_wait=2,                         # settle before each live resolution
         )
         .goto(url)
         # --- log in: describe each field by its visible label ----------------
@@ -60,20 +64,13 @@ def main() -> int:
         .type_agent("ログインID", os.getenv("APP_USER", "<user>"))
         .type_agent("パスワード", os.getenv("APP_PASSWORD", "<password>"))
         .click_agent("入力欄下のログインボタン")
-        .wait()                                  # wait out the login navigation
-        .wait(seconds=2)                         # let the post-login UI settle
         # --- dismiss a popup if one appears (optional => soft-fail) ----------
         .click_agent("ポップアップしたものを閉じる", optional=True)
-        .wait(seconds=1)
         # --- navigate to the leave-request form -----------------------------
         .click_agent("申請承認")
-        .wait()
         .click_agent("各種申請")
-        .wait()
         .click_agent("新規申請の+")
-        .wait(seconds=1)
         .click_agent("申請書提出欄の有給申請")
-        .wait(seconds=1)
         # --- fill it in ------------------------------------------------------
         .click_agent("2026年6月25日")            # concrete date; relative ("明日") is unreliable
         .type_agent("理由", "休暇申請のテスト")    # resolves to the textarea, not the "理由" label
