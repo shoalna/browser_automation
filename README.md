@@ -234,7 +234,7 @@ browser.run()
 |---|---|
 | `.click(selector, optional=False)` | Click the first matching element |
 | `.type(selector, text, optional=False)` | Clear and fill an input |
-| `.select(selector, value, optional=False)` | Select a `<select>` option by value |
+| `.select(selector, value, optional=False)` | Select a `<select>` option by value or visible label |
 | `.hover(selector, optional=False)` | Hover over an element |
 
 ### Scroll

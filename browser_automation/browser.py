@@ -550,7 +550,9 @@ class Browser:
 
         Args:
             selector: The ``<select>`` element selector.
-            value: The ``value`` attribute of the ``<option>`` to select.
+            value: The option to select — matched against its ``value``
+                attribute first, then its visible label. If no option matches,
+                a ``ValueError`` lists the available options.
             optional: Record failure instead of raising.
 
         Returns:
@@ -559,7 +561,8 @@ class Browser:
         Examples:
             ::
 
-                Browser().goto(url).select("#country", "US").run()
+                Browser().goto(url).select("#country", "US").run()           # by value
+                Browser().goto(url).select("#country", "United States").run()  # by label
         """
         def step():
             action_select(self._ensure_target(), selector, value)
@@ -1375,7 +1378,9 @@ class Browser:
     def select_agent(self, description: str, value: str, *, optional: bool = False) -> "Browser":
         """Select option *value* in the ``<select>`` matching *description*.
 
-        See :meth:`select`. The ``<select>`` element is resolved by description.
+        See :meth:`select`. The ``<select>`` is resolved by description, and
+        *value* matches the option's value attribute or visible label — pass the
+        on-screen option text (e.g. ``"有休"``) and it just works.
         """
         def step():
             xpath = self._resolve_agent("select", description, multi=False)

@@ -62,14 +62,41 @@ def action_type(page: Page, selector: str, text: str) -> None:
 
 
 def action_select(page: Page, selector: str, value: str) -> None:
-    """Select an option by value in a ``<select>`` element.
+    """Select an option in a ``<select>`` element, by value or visible label.
+
+    Tries the option's ``value`` attribute first (a short attempt so the
+    fallback is fast), then its visible label — so callers can pass either
+    ``"US"`` (value) or ``"United States"`` (label). The label fallback is what
+    makes ``select_agent`` work when you describe the option by its on-screen
+    text.
 
     Examples:
-        >>> action_select(page, "#country", "US")
-        >>> action_select(page, "select[name='size']", "large")
+        >>> action_select(page, "#country", "US")            # by value
+        >>> action_select(page, "select[name='size']", "Large")  # by label
     """
     logger.debug("select %s <- %r", selector, value)
-    page.locator(selector).first.select_option(value)
+    locator = page.locator(selector).first
+    try:
+        locator.select_option(value, timeout=3000)
+        return
+    except PlaywrightTimeoutError:
+        pass
+    try:
+        locator.select_option(label=value, timeout=3000)
+        return
+    except PlaywrightTimeoutError:
+        pass
+    # Neither value nor label matched — surface the real options so the caller
+    # can see exactly what to pass (instead of an opaque timeout).
+    try:
+        options = locator.evaluate(
+            "el => Array.from(el.options).map(o =>"
+            " ({value: o.value, label: (o.label || o.textContent || '').trim()}))"
+        )
+    except Exception:
+        options = []
+    available = ", ".join(f"{o['label']!r} (value={o['value']!r})" for o in options) or "<none>"
+    raise ValueError(f"select: no option matching {value!r}. Available options: {available}")
 
 
 def action_hover(page: Page, selector: str) -> None:
