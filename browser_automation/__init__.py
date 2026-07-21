@@ -25,7 +25,27 @@ See :class:`~browser_automation.browser.Browser` for the full API.
 
 from .agent import AgentResolutionError
 from .browser import Browser
+from .codegen import (
+    ConsolePrompter,
+    MissingParamsError,
+    Parse,
+    Prompter,
+    Scenario,
+    ScenarioError,
+    ScenarioResolutionError,
+)
 from .result import Result
 
-__all__ = ["Browser", "Result", "AgentResolutionError"]
-__version__ = "0.4.0"
+__all__ = [
+    "Browser",
+    "Result",
+    "AgentResolutionError",
+    "Scenario",
+    "Parse",
+    "Prompter",
+    "ConsolePrompter",
+    "ScenarioError",
+    "ScenarioResolutionError",
+    "MissingParamsError",
+]
+__version__ = "0.5.0"

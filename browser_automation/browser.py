@@ -77,6 +77,7 @@ from .actions import (
     action_type,
     action_wait,
 )
+from ._anthropic import DEFAULT_MODEL
 from .result import Result
 
 logger = logging.getLogger("browser_automation")
@@ -187,7 +188,7 @@ class Browser:
         record_video_dir: str | None = None,
         record_video_size: tuple[int, int] | None = None,
         help: bool = False,
-        agent_model: str = "claude-sonnet-4-6",
+        agent_model: str = DEFAULT_MODEL,
         agent_cache_file: str = ".browser_automation_agent_cache.json",
         agent_api_key: str | None = None,
         agent_wait: float = 0,

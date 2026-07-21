@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "browser_automation"
-version = "0.4.0"
+version = "0.5.0"
 description = "A fluent, ergonomic browser automation library built on Playwright"
 readme = "README.md"
 requires-python = ">=3.9"
