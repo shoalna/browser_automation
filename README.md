@@ -371,6 +371,122 @@ result.ok         # True if no soft failures
 
 ---
 
+## Scenario (natural-language workflows)
+
+`*_agent` methods resolve one element at a time. `Scenario` goes a step further:
+describe the **whole workflow** in plain language and it compiles that into
+`browser_automation` code built on `*_agent`, runs it, validates the result, and
+caches the generated code. Later runs re-execute the cached code against the live
+site for fresh data — no LLM call, no API key.
+
+`Scenario` is symmetric with `Browser`: construct one and call `.run()`, which
+returns the same `Result`.
+
+```python
+from browser_automation import Scenario
+
+result = (
+    Scenario(
+        """
+        Go to news.ycombinator.com, click "new" in the top nav,
+        and collect the story headlines as `headlines`.
+        """,
+        help=True,          # help=True permits live LLM calls
+    )
+    .run()
+)
+
+print(result["headlines"])
+```
+
+### Runtime values with `Parse`
+
+Anything that changes between runs — a search term, a date, a password — belongs
+in a `{placeholder}` token, with its value supplied by `Parse`. Placeholder
+*values* are never hashed into the cache key nor baked into the generated code, so
+one cached scenario serves every set of inputs, and secrets stay out of the cache
+file.
+
+```python
+import os
+
+from browser_automation import Scenario, Parse
+
+result = (
+    Scenario(
+        """
+        Log in to {site} with username {user} and password {password},
+        open the billing page, and extract the current balance as `balance`.
+        """,
+        parse=Parse(
+            site="https://example.com",
+            user="alice@example.com",
+            password=os.environ["APP_PASSWORD"],
+        ),
+        help=True,
+    )
+    .run()
+)
+
+print(result["balance"])
+```
+
+A placeholder with no value in `Parse` raises `MissingParamsError` before any
+browser or LLM work starts. Literal text *is* hashed — editing the wording
+invalidates the cache and regenerates the code.
+
+### Inspect the generated code
+
+```python
+scenario = Scenario("Go to example.com and extract the h1 as `title`.", help=True)
+print(scenario.to_code())   # generates without running; never writes the cache
+```
+
+### From the command line
+
+```bash
+python -m browser_automation.codegen \
+    "Search PyPI for {query} and collect the result names as \`names\`." \
+    --param query=playwright
+```
+
+Extracted data is printed as JSON. Add `--no-help` to forbid live LLM calls
+(cache-only), the CLI equivalent of `help=False`.
+
+### Scenario constructor options
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `text` | `str` | — | The scenario, with `{placeholder}` tokens for runtime values |
+| `parse` | `Parse \| None` | `None` | Values for the scenario's placeholders |
+| `help` | `bool` | `False` | Permit live LLM calls (the cache is always consulted) |
+| `model` | `str` | `"claude-sonnet-4-6"` | Claude model used for generation |
+| `api_key` | `str \| None` | `None` | Anthropic key (else `ANTHROPIC_API_KEY` from env) |
+| `code_cache_file` | `str` | `".browser_automation_scenario_cache.json"` | JSON cache of generated code |
+| `agent_cache_file` | `str` | `".browser_automation_agent_cache.json"` | XPath cache used by the underlying `*_agent` calls |
+| `prompter` | `Prompter \| None` | `None` | Asks clarifying questions (default: `ConsolePrompter`) |
+| `max_retries` | `int` | `3` | Generate → run → refine attempts before giving up |
+| `timeout` | `float` | `120.0` | Wall-clock seconds allowed for one scenario run |
+| `headless` | `bool` | `True` | Hide the browser window |
+| `agent_wait` | `float` | `0` | Seconds to settle before a *live* `*_agent` resolution |
+| `verbose` | `bool` | `False` | Enable DEBUG-level logging |
+
+### Notes
+
+- **`help` gates live LLM calls only.** With `help=False` (the default), a cache
+  miss raises `ScenarioResolutionError`. Commit both cache files and production
+  runs need no API key.
+- **Only validated runs are cached.** Generated code is stored after it has
+  actually run and produced the expected extractions; a cache hit that no longer
+  validates is regenerated (when `help=True`).
+- **Generated code is sandboxed.** It is checked against an AST whitelist
+  (`params` / `browser` and literals only), `exec`'d in a namespace with no
+  builtins, and run in a worker thread under the `timeout` above.
+- **`Prompter` is for clarifications, not values** — missing structural detail
+  like a start URL or a success signal. Routine inputs always come from `Parse`.
+
+---
+
 ## Logging
 
 `browser_automation` uses Python's standard `logging` module under the
