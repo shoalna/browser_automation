@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 
 import anthropic
+
+from ._anthropic import build_client, structured_json_text
+from ._jsoncache import AtomicJsonCache
 
 logger = logging.getLogger("browser_automation")
 
@@ -49,25 +50,12 @@ class AgentResolutionError(RuntimeError):
 # Cache
 # ---------------------------------------------------------------------------
 
-class AgentCache:
+class AgentCache(AtomicJsonCache):
     """Nested-dict JSON cache of resolved XPaths, keyed url -> method -> description.
 
     Loaded lazily on first access and written through (atomically) after every
     new resolution so a workflow that crashes partway keeps what it learned.
     """
-
-    def __init__(self, path: str) -> None:
-        self._path = path
-        self._data: dict | None = None  # loaded lazily
-
-    def _load(self) -> None:
-        if self._data is not None:
-            return
-        try:
-            with open(self._path, "r", encoding="utf-8") as f:
-                self._data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            self._data = {}
 
     def get(self, url: str, method: str, description: str) -> str | None:
         self._load()
@@ -79,21 +67,6 @@ class AgentCache:
         assert self._data is not None
         self._data.setdefault(url, {}).setdefault(method, {})[description] = xpath
         self._flush()
-
-    def _flush(self) -> None:
-        """Write the cache atomically: temp file in the same dir, then os.replace."""
-        directory = os.path.dirname(os.path.abspath(self._path)) or "."
-        fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(self._data, f, indent=2, ensure_ascii=False)
-            os.replace(tmp, self._path)
-        except Exception:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-            raise
 
 
 # ---------------------------------------------------------------------------
@@ -177,13 +150,7 @@ class AgentResolver:
 
     def _ensure_client(self) -> anthropic.Anthropic:
         if self._client is None:
-            # Bump retries above the SDK default of 2 so transient overloads
-            # (429 / 500 / 529) during a spike are absorbed with backoff rather
-            # than aborting the workflow mid-run.
-            kwargs: dict = {"max_retries": 5}
-            if self._api_key:
-                kwargs["api_key"] = self._api_key
-            self._client = anthropic.Anthropic(**kwargs)
+            self._client = build_client(self._api_key)
         return self._client
 
     # -- public entry point -------------------------------------------------
@@ -344,19 +311,10 @@ class AgentResolver:
         raise AgentResolutionError(description, "resolution failed")
 
     def _call(self, messages: list[dict]) -> dict:
-        client = self._ensure_client()
-        resp = client.messages.create(
-            model=self._model,
-            max_tokens=1024,
-            system=[{
-                "type": "text",
-                "text": _SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }],
-            messages=messages,
-            output_config={"format": {"type": "json_schema", "schema": _RESPONSE_SCHEMA}},
+        text = structured_json_text(
+            self._ensure_client(), self._model, _SYSTEM_PROMPT, messages,
+            _RESPONSE_SCHEMA, max_tokens=1024,
         )
-        text = next((b.text for b in resp.content if b.type == "text"), None)
         if text is None:
             return {"found": False, "xpath": "", "reason": "model returned no content"}
         try:
